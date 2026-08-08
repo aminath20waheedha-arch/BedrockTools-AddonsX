@@ -25,6 +25,7 @@ private:
 
     bool   m_glInitialized = false;
     bool   m_hasPreviousFrame = false;
+    int    m_frameCounter = 0;
     GLuint m_currentFrameTexture   = 0;
     GLuint m_previousFrameTexture  = 0;
     GLuint m_shaderProgram         = 0;
