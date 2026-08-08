@@ -34,13 +34,6 @@ void main() {
 }
 )";
 
-// Internal render scale for the blur pass. 1.0 = full resolution (expensive,
-// causes the GPU stall/stutter). Lowering this cuts the cost of the
-// glCopyTexSubImage2D call (and the shader pass) roughly quadratically,
-// since it copies/samples far fewer pixels, while the final quad is still
-// drawn stretched across the whole screen so it looks the same visually.
-static constexpr float kRenderScale = 0.5f;
-
 
 MotionBlurModule::MotionBlurModule()
     : Module("Motion Blur", "Adds a smooth motion blur effect when rotating the camera.") {}
@@ -48,7 +41,7 @@ MotionBlurModule::MotionBlurModule()
 void MotionBlurModule::onInit() {
 }
 
-void MotionBlurModule::onEnable() { m_hasPreviousFrame = false; }
+void MotionBlurModule::onEnable() { m_hasPreviousFrame = false; m_frameCounter = 0; }
 
 void MotionBlurModule::onDisable() { m_hasPreviousFrame = false; }
 
@@ -129,13 +122,69 @@ void MotionBlurModule::onFrame() {
     EGLSurface surface = eglGetCurrentSurface(EGL_DRAW);
     if (display == EGL_NO_DISPLAY || surface == EGL_NO_SURFACE) return;
 
-    EGLint fullWidth, fullHeight;
-    eglQuerySurface(display, surface, EGL_WIDTH, &fullWidth);
-    eglQuerySurface(display, surface, EGL_HEIGHT, &fullHeight);
-    if (fullWidth <= 0 || fullHeight <= 0) return;
+    EGLint width, height;
+    eglQuerySurface(display, surface, EGL_WIDTH, &width);
+    eglQuerySurface(display, surface, EGL_HEIGHT, &height);
+    if (width <= 0 || height <= 0) return;
 
-    // Render/copy at a reduced internal resolution to cut the cost of the
-    // per-frame framebuffer copy - this is the main stutter fix.
-    int width  = static_cast<int>(fullWidth  * kRenderScale);
-    int height = static_cast<int>(fullHeight * kRenderScale);
-    if (width < 1) width
+    allocateTextures(width, height);
+
+    glViewport(0, 0, width, height);
+    glDisable(GL_SCISSOR_TEST);
+
+    // Only grab a fresh copy of the screen every other frame. The expensive
+    // part of this effect is glCopyTexSubImage2D (it forces the GPU to
+    // finish/sync the full-res framebuffer), so halving how often we do it
+    // roughly halves that stall cost, at the price of the blur updating
+    // slightly less often. The blend/draw pass still happens every frame,
+    // so motion still looks continuous, just using a slightly-older
+    // "previous frame" texture on the skipped frames.
+    m_frameCounter++;
+    bool shouldCapture = (m_frameCounter % 2) == 0;
+
+    if (shouldCapture) {
+        glBindTexture(GL_TEXTURE_2D, m_currentFrameTexture);
+        glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, width, height);
+    }
+
+    glUseProgram(m_shaderProgram);
+    glActiveTexture(GL_TEXTURE10);
+    glBindTexture(GL_TEXTURE_2D, m_currentFrameTexture);
+    glUniform1i(m_currentFrameLocation, 10);
+
+    glActiveTexture(GL_TEXTURE11);
+    glBindTexture(GL_TEXTURE_2D, m_hasPreviousFrame ? m_previousFrameTexture : m_currentFrameTexture);
+    glUniform1i(m_previousFrameLocation, 11);
+
+    glUniform1f(m_blendFactorLocation, 1.0f - std::exp2(-5.0f * m_intensity));
+    glUniform1f(m_opacityLocation, m_opacity);
+
+    glBindBuffer(GL_ARRAY_BUFFER, m_vertexBuffer);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_indexBuffer);
+
+    glEnableVertexAttribArray(static_cast<GLuint>(m_positionLocation));
+    glVertexAttribPointer(static_cast<GLuint>(m_positionLocation), 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), nullptr);
+
+    glEnableVertexAttribArray(static_cast<GLuint>(m_texCoordLocation));
+    glVertexAttribPointer(static_cast<GLuint>(m_texCoordLocation), 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), reinterpret_cast<void*>(2 * sizeof(GLfloat)));
+
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, nullptr);
+
+    if (shouldCapture) {
+        std::swap(m_currentFrameTexture, m_previousFrameTexture);
+        m_hasPreviousFrame = true;
+    }
+}
+
+
+void MotionBlurModule::loadConfig(const nlohmann::json& j) {
+    Module::loadConfig(j);
+    if (j.contains("intensity")) m_intensity = j["intensity"].get<float>();
+    if (j.contains("opacity"))   m_opacity   = j["opacity"].get<float>();
+}
+
+void MotionBlurModule::saveConfig(nlohmann::json& j) {
+    Module::saveConfig(j);
+    j["intensity"] = m_intensity;
+    j["opacity"]   = m_opacity;
+}
