@@ -74,7 +74,7 @@ bool ModuleRegistry::keybindBlocked() const {
 
 void registerAllModules() {
     auto& registry = ModuleRegistry::get();
-    if (!registry.modules().empty()) return; lol
+    if (!registry.modules().empty()) return;
     registry.emplace<FullbrightModule>();
     registry.emplace<JumpscareModule>();
     registry.emplace<MotionBlurModule>();
