@@ -15,6 +15,7 @@
 #include "misc/nodisconnect.hpp"
 #include "misc/notouchborder.hpp"
 #include "misc/cpslimiter.hpp"
+#include "misc/jumpscare.hpp"
 #include "hud/speeddisplay.hpp"
 #include "hud/debugmenu.hpp"
 #include "visual/viewmodel.hpp"
@@ -73,8 +74,9 @@ bool ModuleRegistry::keybindBlocked() const {
 
 void registerAllModules() {
     auto& registry = ModuleRegistry::get();
-    if (!registry.modules().empty()) return;
+    if (!registry.modules().empty()) return; lol
     registry.emplace<FullbrightModule>();
+    registry.emplace<JumpscareModule>();
     registry.emplace<MotionBlurModule>();
     registry.emplace<FogColorModule>();
     registry.emplace<NoFogModule>();
